@@ -1441,7 +1441,7 @@ class MainWindow(QMainWindow):
             self._act_curve_view.setChecked(bool(visible))
         if visible and bool(getattr(self, "_multi_curve_enabled", False)):
             self._seed_view_curves_from_current_canvas()
-            self._redraw_all()
+            self._redraw_preserving_canvas_view()
 
     def _on_multi_curve_toggled(self, checked: bool):
         self._multi_curve_enabled = bool(checked)
@@ -1450,7 +1450,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             "Multiple curve selection enabled" if checked else "Multiple curve selection disabled"
         )
-        self._redraw_all()
+        self._redraw_preserving_canvas_view()
 
     def _on_curve_color_mode_changed(self, _index: int):
         if hasattr(self, "cmb_curve_color_mode"):
@@ -2446,7 +2446,7 @@ class MainWindow(QMainWindow):
             widget.setProperty("curve_row", row_index)
             widget.setProperty("curve_col", col_index)
 
-        def _sync_curve():
+        def _sync_curve(*, redraw: bool = True):
             curve["visible"] = chk_show.isChecked()
             curve["marker"] = str(cmb_type.currentData() or "none")
             curve["line_style"] = str(cmb_line.currentData() or "none")
@@ -2460,7 +2460,8 @@ class MainWindow(QMainWindow):
             if color_data != "__more__":
                 curve["color"] = str(color_data)
             curve["width"] = float(spin_width.value())
-            self._redraw_all()
+            if redraw:
+                self._redraw_preserving_canvas_view()
 
         def _choose_color(index: int):
             item_data = cmb_color.itemData(index)
@@ -2508,7 +2509,7 @@ class MainWindow(QMainWindow):
         spin_width.valueChanged.connect(lambda _value: _sync_curve())
         self.btn_clear_curves.setEnabled(True)
         self._update_curve_selection_buttons()
-        _sync_curve()
+        _sync_curve(redraw=False)
 
     def _on_clear_view_curves(self):
         if not self._view_curves:
@@ -2556,7 +2557,7 @@ class MainWindow(QMainWindow):
         self._apply_curve_row_selection_style()
         self.btn_clear_curves.setEnabled(bool(self._view_curves))
         self._update_curve_selection_buttons()
-        self._redraw_all()
+        self._redraw_preserving_canvas_view()
 
     def _on_clear_selected_view_curve(self):
         remove_indices = {
@@ -2632,9 +2633,10 @@ class MainWindow(QMainWindow):
             self.chk_multi_curve.setChecked(True)
         added = 0
         skipped: list[str] = []
+        accepted_import_units = {"accepted": False}
         for path in paths:
             try:
-                mat = loadmat(path, squeeze_me=True, struct_as_record=False)
+                mat = self._wizard_load_mat(path)
                 declared_units = self._declared_mat_units(mat)
                 base_legend = self._curve_legend_from_mat(mat, Path(path).stem)
                 curve_R_eq = self._mat_to_float(mat, "R_eq", None)
@@ -2710,9 +2712,14 @@ class MainWindow(QMainWindow):
                         redraw=False,
                     )
                     added += 1
-                if t_exp.size >= 3 or t_sim.size >= 3:
+                if has_exp_curve or has_sim_curve:
                     continue
-                exp = load_experiment_mat(path)
+                exp = self._load_experiment_with_import_defaults(
+                    path,
+                    confirm_units=True,
+                    parent=self,
+                    accepted_state=accepted_import_units,
+                )
                 self._add_curve_to_view(
                     curve_type="experiment",
                     t=exp.t,
@@ -3981,8 +3988,8 @@ class MainWindow(QMainWindow):
             "R_exp": {"m", "um", "pixel"},
             "t_sim": {"s", "us"},
             "R_sim": {"m", "um"},
-            "Req": {"m", "um"},
-            "Rmax": {"m", "um"},
+            "Req": {"m", "um", "pixel"},
+            "Rmax": {"m", "um", "pixel"},
         }
         for name, allowed in valid.items():
             unit = str(source.get(name, out.get(name, "")))
@@ -5075,6 +5082,14 @@ class MainWindow(QMainWindow):
     # redraw
     # =====================================================================
 
+    def _redraw_preserving_canvas_view(self):
+        """Redraw Curve View edits without resetting the user's viewport."""
+        view_limits = self.canvas.capture_view_limits()
+        pinned_data_tips = self.canvas.capture_pinned_data_tips()
+        self._redraw_all()
+        self.canvas.restore_view_limits(view_limits)
+        self.canvas.restore_pinned_data_tips(pinned_data_tips)
+
     def _redraw_all(self):
         self.canvas.clear_data_tip()
         self.canvas.ax.clear()
@@ -5431,6 +5446,10 @@ class MainWindow(QMainWindow):
                 return hit
         for cand in candidates:
             cand_l = cand.lower()
+            # Single-letter aliases such as t and R are useful exact names,
+            # but are too broad for prefix matching (for example tracked_radius).
+            if len(cand_l) < 2:
+                continue
             for key in keys:
                 name = key.lower().split(".")[-1]
                 if name == cand_l or name.startswith(cand_l):
@@ -5459,6 +5478,13 @@ class MainWindow(QMainWindow):
         return combo
 
     def _import_unit_to_si(self, name: str, value, unit: str):
+        if str(unit or "").strip().lower() == "pixel" and name in (
+            "R_exp", "R_sim", "Req", "Rmax"
+        ):
+            um_per_pixel = float(self._import_wizard_um_per_pixel)
+            if not np.isfinite(um_per_pixel) or um_per_pixel <= 0.0:
+                raise ValueError("um/pixel must be positive for pixel radius conversion.")
+            return np.asarray(value, dtype=float) * um_per_pixel * 1e-6
         if value is None:
             return None
         if unit == "us":
@@ -5468,6 +5494,15 @@ class MainWindow(QMainWindow):
         if unit == "pixel":
             return np.asarray(value, dtype=float) * float(self._import_wizard_um_per_pixel) * 1e-6
         return value
+
+    @staticmethod
+    def _import_scalar_display_value(name: str, value: float, unit: str) -> float:
+        if name in ("Req", "Rmax"):
+            # The unit selector describes the source MAT value for these rows.
+            return float(value)
+        if unit in ("um", "us"):
+            return float(value) * 1e6
+        return float(value)
 
     @staticmethod
     def _normalise_declared_time_unit(value: str) -> str | None:
@@ -5709,6 +5744,7 @@ class MainWindow(QMainWindow):
         R: np.ndarray,
         legend: str,
         Req: float | None,
+        Rmax: float | None,
         P_inf: float | None,
         rho: float | None,
         c_long: float | None,
@@ -5807,7 +5843,13 @@ class MainWindow(QMainWindow):
             self.state.R_eq = float(np.mean(R[-min(20, R.size):]))
         if self.state.R_eq is not None:
             self._set_req_controls_from_exp(float(self.state.R_eq), update_sim=True)
-        self._sync_rmax_from_experiment()
+        if Rmax is None:
+            self._sync_rmax_from_experiment()
+        else:
+            if hasattr(self, "chk_Rmax_auto"):
+                self.chk_Rmax_auto.setChecked(False)
+            if hasattr(self, "spin_Rmax_um"):
+                self.spin_Rmax_um.setValue(float(Rmax) * 1e6)
         if P_inf is not None:
             self.spin_P_inf.setValue(float(P_inf))
         if rho is not None:
@@ -5978,6 +6020,8 @@ class MainWindow(QMainWindow):
                 layout.removeRow(0)
 
         def unit_options_for_name(name: str) -> list[str]:
+            if name in ("Req", "Rmax"):
+                return ["m", "um", "pixel"]
             if name in ("t_exp", "t_sim", "t_start", "t_end"):
                 return ["s", "us"]
             if name == "R_exp":
@@ -6057,12 +6101,9 @@ class MainWindow(QMainWindow):
         def display_scalar(name: str, value: float) -> float:
             if name in ctx.get("declared_units", {}):
                 return float(value)
-            unit = unit_for_preview(name)
-            if unit == "um":
-                return float(value) * 1e6
-            if unit == "us":
-                return float(value) * 1e6
-            return float(value)
+            return self._import_scalar_display_value(
+                name, value, unit_for_preview(name)
+            )
 
         def sci3(value: float, unit: str = "") -> str:
             text = f"{float(value):.2e}"
@@ -6515,6 +6556,7 @@ class MainWindow(QMainWindow):
                     R=R,
                     legend=str(legend),
                     Req=selected_scalar("Req"),
+                    Rmax=selected_scalar("Rmax"),
                     P_inf=selected_scalar("P_inf"),
                     rho=selected_scalar("rho"),
                     c_long=selected_scalar("c_long"),

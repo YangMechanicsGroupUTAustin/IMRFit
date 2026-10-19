@@ -79,6 +79,27 @@ class CurveViewRegressionTests(unittest.TestCase):
 
         self.assertEqual(colors, ["#d62728", "#d62728"])
 
+    def test_curve_edit_redraw_restores_view_limits_and_pinned_tips(self):
+        calls = []
+        limits = ((-1.5, 3.0), (1.0, 9.0))
+        pins = [{"line_index": 0, "x": 1.0, "y": 2.0}]
+        state = SimpleNamespace(
+            canvas=SimpleNamespace(
+                capture_view_limits=lambda: limits,
+                capture_pinned_data_tips=lambda: pins,
+                restore_view_limits=lambda value: calls.append(("limits", value)),
+                restore_pinned_data_tips=lambda value: calls.append(("pins", value)),
+            ),
+            _redraw_all=lambda: calls.append(("redraw", None)),
+        )
+
+        MainWindow._redraw_preserving_canvas_view(state)
+
+        self.assertEqual(
+            calls,
+            [("redraw", None), ("limits", limits), ("pins", pins)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

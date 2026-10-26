@@ -393,3 +393,9 @@ test/                       # Test MAT files
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+## Contributing and support
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for bug reports, development checks, and
+pull requests. Ask questions or report problems through
+[GitHub Issues](https://github.com/YangMechanicsGroupUTAustin/IMRFit/issues).

@@ -57,6 +57,14 @@ docs/tutorials/media/README.md
 imr_gui/settings.json
 user_models_ready2ues/
 
+# Local experimental GMOD models and their regression test
+user_models/GMOD1_COMPRESSIBLE_TEST.json
+user_models/GMOD1_DYNAMICS_TEST.json
+user_models/GMOD2_DYNAMICS_TEST.json
+user_models/gmod_compressible_solver.py
+user_models/gmod_dynamics_solver.py
+tests/test_gmod_dynamics_plugins.py
+
 # Fitting/debug scratch outputs
 ps_debug_*.csv
 ps_debug_*.mat

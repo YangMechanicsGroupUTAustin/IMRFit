@@ -4,6 +4,8 @@
 
 A Python desktop application for inertial microrheology (IMR) bubble simulation and parameter fitting, replacing the original MATLAB `patternsearch + IMR` workflow.
 
+**Video demo:** [Watch the early IMRFit overview (15 min)](https://youtu.be/XSWr2syHzf4). The interface may differ from the current release; this overview will be replaced by step-by-step tutorials.
+
 ---
 
 ## Beta 1.32 highlights

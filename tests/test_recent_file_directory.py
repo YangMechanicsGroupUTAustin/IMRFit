@@ -15,6 +15,7 @@ class RecentFileDirectoryTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.folder = self.root / "experiment"
         self.folder.mkdir()
+        self.folder = self.folder.resolve()
         self.settings = self.root / "settings.json"
         self.settings.write_text(json.dumps({"physics": {"rho": 998}, "ui": {"active_model": "NHKV"}}))
         self.window = SimpleNamespace(
